@@ -1,4 +1,5 @@
-"""scdl allows you to download music from Soundcloud
+"""
+scdl allows you to download music from SoundCloud
 
 Usage:
     scdl (-l <track_url> | -s <search_query> | me) [-a | -f | -C | -t | -p | -r]
@@ -13,66 +14,8 @@ Usage:
 
     scdl -h | --help
     scdl --version
-
-
-Options:
-    -h --help                       Show this screen
-    --version                       Show version
-    -l [url]                        URL can be track/playlist/user
-    -s [search_query]               Search for a track/playlist/user and use the first result
-    -n [maxtracks]                  Download the n last tracks of a playlist according to the
-                                    creation date
-    -a                              Download all tracks of user (including reposts)
-    -t                              Download all uploads of a user (no reposts)
-    -f                              Download all favorites (likes) of a user
-    -C                              Download all tracks commented on by a user
-    -p                              Download all playlists of a user
-    -r                              Download all reposts of user
-    -c                              Continue if a downloaded file already exists
-    --force-metadata                This will set metadata on already downloaded track
-    -o [offset]                     Start downloading a playlist from the [offset]th track
-                                    Indexing starts with 1.
-    --addtimestamp                  Add track creation timestamp to filename,
-                                    which allows for chronological sorting
-                                    (Deprecated. Use --name-format instead.)
-    --addtofile                     Add artist to filename if missing
-    --debug                         Set log level to DEBUG
-    --error                         Set log level to ERROR
-    --download-archive [file]       Keep track of track IDs in an archive file,
-                                    and skip already-downloaded files
-    --extract-artist                Set artist tag from title instead of username
-    --hide-progress                 Hide the wget progress bar
-    --hidewarnings                  Hide Warnings. (use with precaution)
-    --max-size [max-size]           Skip tracks larger than size (k/m/g)
-    --min-size [min-size]           Skip tracks smaller than size (k/m/g)
-    --no-playlist-folder            Download playlist tracks into main directory,
-                                    instead of making a playlist subfolder
-    --onlymp3                       Download only mp3 files
-    --path [path]                   Use a custom path for downloaded files
-    --remove                        Remove any files not downloaded from execution
-    --sync [file]                   Compares an archive file to a playlist and downloads/removes
-                                    any changed tracks
-    --flac                          Convert original files to .flac. Only works if the original
-                                    file is lossless quality
-    --no-album-tag                  On some player track get the same cover art if from the same
-                                    album, this prevent it
-    --original-art                  Download original cover art, not just 500x500 JPEG
-    --original-name                 Do not change name of original file downloads
-    --original-metadata             Do not change metadata of original file downloads
-    --no-original                   Do not download original file; only mp3, m4a, or opus
-    --only-original                 Only download songs with original file available
-    --name-format [format]          Specify the downloaded file name format. Use "-" to download
-                                    to stdout
-    --playlist-name-format [format] Specify the downloaded file name format, if it is being
-                                    downloaded as part of a playlist
-    --client-id [id]                Specify the client_id to use
-    --auth-token [token]            Specify the auth token to use
-    --overwrite                     Overwrite file if it already exists
-    --strict-playlist               Abort playlist downloading if one track fails to download
-    --no-playlist                   Skip downloading playlists
-    --add-description               Adds the description to a separate txt file
-    --opus                          Prefer downloading opus streams over mp3 streams
 """
+
 import atexit
 import configparser
 import contextlib
@@ -132,19 +75,20 @@ from soundcloud import (
 
 from scdl import __version__, utils
 from scdl.metadata_assembler import MetadataInfo, assemble_metadata
-from com.example.chaquopy import FFmpegWrapper
+
+try:
+    from com.example.chaquopy import FFmpegWrapper
+except ImportError as e:
+    logging.error(f"Failed to import FFmpegWrapper: {e}")
+    FFmpegWrapper = None
 
 mimetypes.init()
 
+# Logger-Konfiguration
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addFilter(utils.ColorizeFilter())
-
-# StreamHandler für Standardausgabe (Android UI)
 logger.addHandler(logging.StreamHandler(sys.stdout))
-
-FFMPEG_PIPE_CHUNK_SIZE = 1024 * 1024  # 1 mb
-files_to_keep = []
 
 # Android-spezifischer Speicherpfad
 BASE_PATH = os.path.join(
@@ -152,6 +96,9 @@ BASE_PATH = os.path.join(
     "scdl_downloads"
 )
 os.makedirs(BASE_PATH, exist_ok=True)
+
+FFMPEG_PIPE_CHUNK_SIZE = 1024 * 1024  # 1 mb
+files_to_keep = []
 
 def ensure_writable_path(path: str) -> None:
     try:
@@ -313,8 +260,18 @@ def get_filelock(path: Union[pathlib.Path, str], timeout: int = 10) -> SafeLock:
     lock_path = str(path) + ".scdl.lock"
     return SafeLock(lock_path, timeout=timeout)
 
+# ==================== Main Section ====================
 def main(args: Optional[dict] = None) -> None:
-    """Main function, parses the URL from arguments"""
+    """
+    Main function to handle SoundCloud downloads.
+    Called by Chaquopy to initiate the download process.
+
+    Args:
+        args (Optional[dict]): Dictionary of command-line arguments.
+    """
+    logger.info("Starting SCDL main function")
+    logger.debug(f"Arguments received: {args}")
+
     if not is_network_available():
         logger.error("No network connection available")
         sys.exit(1)
@@ -322,8 +279,8 @@ def main(args: Optional[dict] = None) -> None:
     if args is None:
         logger.error("No arguments provided")
         sys.exit(1)
-    arguments = args
 
+    arguments = args
     if arguments.get("--debug"):
         logger.setLevel(logging.DEBUG)
     elif arguments.get("--error"):
@@ -332,8 +289,8 @@ def main(args: Optional[dict] = None) -> None:
     config_file = pathlib.Path(os.path.join(BASE_PATH, "scdl.cfg"))
     config = get_config(config_file)
 
-    logger.info("Soundcloud Downloader")
-    logger.debug(arguments)
+    logger.info("SoundCloud Downloader")
+    logger.debug(f"Configuration: {config['scdl']}")
 
     client_id = arguments.get("--client-id") or config["scdl"]["client_id"]
     token = arguments.get("--auth-token") or config["scdl"]["auth_token"]
@@ -344,11 +301,11 @@ def main(args: Optional[dict] = None) -> None:
         if arguments.get("--client-id"):
             logger.warning(
                 "Invalid client_id specified by --client-id argument. "
-                "Using a dynamically generated client_id...",
+                "Using a dynamically generated client_id..."
             )
         elif config["scdl"]["client_id"]:
             logger.warning(
-                f"Invalid client_id in {config_file}. Using a dynamically generated client_id...",
+                f"Invalid client_id in {config_file}. Using a dynamically generated client_id..."
             )
         else:
             logger.info("Generating dynamic client_id")
@@ -445,6 +402,9 @@ def main(args: Optional[dict] = None) -> None:
 
     if arguments.get("--remove"):
         remove_files()
+
+    logger.info("Download completed successfully")
+# ==================== End Main Section ====================
 
 def validate_url(client: SoundCloud, url: str) -> str:
     if url.startswith(("https://m.soundcloud.com", "http://m.soundcloud.com", "m.soundcloud.com")):
@@ -1381,6 +1341,9 @@ def _get_ffmpeg_pipe(
         ),
     )
     logger.debug(f"FFmpegKit wrapper command: {commands}")
+    if FFmpegWrapper is None:
+        logger.error("FFmpegWrapper is not available")
+        sys.exit(1)
     wrapper = FFmpegWrapper()
     try:
         result = wrapper.executeFFmpeg(commands)
@@ -1432,6 +1395,9 @@ def _re_encode_ffmpeg(
             ),
         )
 
+        if FFmpegWrapper is None:
+            logger.error("FFmpegWrapper is not available")
+            sys.exit(1)
         wrapper = FFmpegWrapper()
         try:
             result = wrapper.executeFFmpeg(command)
@@ -1511,6 +1477,9 @@ def re_encode_to_buffer(
 
 @lru_cache(maxsize=1)
 def get_ffmpeg_supported_options() -> Set[str]:
+    if FFmpegWrapper is None:
+        logger.error("FFmpegWrapper is not available")
+        sys.exit(1)
     wrapper = FFmpegWrapper()
     if not wrapper.isFFmpegSupported():
         logger.error("FFmpegKit is not supported")
