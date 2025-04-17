@@ -1522,3 +1522,6 @@ def get_ffmpeg_supported_options() -> Set[str]:
         "-f",
         "-c",
     }
+
+if __name__ == "__main__":
+    main()
