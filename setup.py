@@ -41,7 +41,7 @@ setup(
             "types-tqdm",
         ],
     },
-    url="https://github.com/flyingrub/scdl",
+    url="https://github.com/psylo-dev/scdl-chaquopy-ffmpeg",
     classifiers=[
         "Programming Language :: Python",
         "Development Status :: 5 - Production/Stable",
