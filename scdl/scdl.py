@@ -287,13 +287,24 @@ def main_with_args(args=None):
     stream_handler.setFormatter(logging.Formatter('%(message)s'))
     logger.addHandler(stream_handler)
 
+    logger.debug("Received arguments: %s", args)
+
     # Parse arguments
-    if args is not None:
-        # Convert list to string for docopt
-        args_string = " ".join(args)
-        arguments = docopt(__doc__, argv=args_string.split(), version=__version__)
-    else:
-        arguments = docopt(__doc__, version=__version__)
+    try:
+        if args is not None:
+            # Ensure args is a list of strings
+            if not isinstance(args, list):
+                logger.error("Arguments must be a list of strings")
+                return "Fehler: Argumente müssen eine Liste von Strings sein"
+            args = [str(arg) for arg in args]  # Convert all arguments to strings
+            args_string = " ".join(args)
+            logger.debug("Parsed args string: %s", args_string)
+            arguments = docopt(__doc__, argv=args_string.split(), version=__version__)
+        else:
+            arguments = docopt(__doc__, version=__version__)
+    except Exception as e:
+        logger.error("Failed to parse arguments: %s", str(e))
+        return f"Fehler: Argumentenparsing fehlgeschlagen: {str(e)}"
 
     if arguments["--debug"]:
         logger.setLevel(logging.DEBUG)
@@ -311,7 +322,7 @@ def main_with_args(args=None):
     config = get_config(config_file)
 
     logger.info("Soundcloud Downloader")
-    logger.debug(arguments)
+    logger.debug("Arguments: %s", arguments)
 
     client_id = arguments["--client-id"] or config["scdl"]["client_id"]
     token = arguments["--auth-token"] or config["scdl"]["auth_token"]
@@ -433,8 +444,12 @@ def main_with_args(args=None):
         return f"Fehler: Ungültiger Download-Pfad '{dl_path}'"
     logger.debug("Downloading to " + os.getcwd() + "...")
 
-    download_url(client, typing.cast(SCDLArgs, python_args))
-    return "Download erfolgreich abgeschlossen"
+    try:
+        download_url(client, typing.cast(SCDLArgs, python_args))
+        return "Download erfolgreich abgeschlossen"
+    except Exception as e:
+        logger.error("Download failed: %s", str(e))
+        return f"Fehler: Download fehlgeschlagen: {str(e)}"
     
 def main() -> None:
     """Main function, parses the URL from command line arguments"""
