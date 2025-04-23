@@ -281,7 +281,11 @@ def get_filelock(path: Union[pathlib.Path, str], timeout: int = 10) -> SafeLock:
 
 def main_with_args(args=None):
     """Main function, parses arguments from a list or command line"""
-    logger.addHandler(logging.StreamHandler())
+    # Ensure logging goes to stdout
+    logger.handlers = []
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(logging.Formatter('%(message)s'))
+    logger.addHandler(stream_handler)
 
     # Parse arguments
     if args is not None:
@@ -292,9 +296,11 @@ def main_with_args(args=None):
         arguments = docopt(__doc__, version=__version__)
 
     if arguments["--debug"]:
-        logger.level = logging.DEBUG
+        logger.setLevel(logging.DEBUG)
     elif arguments["--error"]:
-        logger.level = logging.ERROR
+        logger.setLevel(logging.ERROR)
+    else:
+        logger.setLevel(logging.INFO)
 
     if "XDG_CONFIG_HOME" in os.environ:
         config_file = pathlib.Path(os.environ["XDG_CONFIG_HOME"], "scdl", "scdl.cfg")
@@ -429,22 +435,6 @@ def main_with_args(args=None):
 
     download_url(client, typing.cast(SCDLArgs, python_args))
     return "Download erfolgreich abgeschlossen"
-
-class UiHandler(logging.Handler):
-    def __init__(self, callback=None):
-        super().__init__()
-        self.callback = callback
-
-    def emit(self, record):
-        msg = self.format(record)
-        if self.callback:
-            self.callback(msg)
-
-def get_ui_handler(callback):
-    handler = UiHandler(callback)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter('%(message)s'))
-    return handler
     
 def main() -> None:
     """Main function, parses the URL from command line arguments"""
