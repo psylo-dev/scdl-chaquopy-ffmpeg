@@ -74,7 +74,7 @@ Options:
     --add-description               Adds the description to a separate txt file
     --opus                          Prefer downloading opus streams over mp3 streams
 """
-
+import logging
 import atexit
 import configparser
 import contextlib
@@ -279,7 +279,173 @@ def get_filelock(path: Union[pathlib.Path, str], timeout: int = 10) -> SafeLock:
     lock_path = str(path) + ".scdl.lock"
     return SafeLock(lock_path, timeout=timeout)
 
+def main_with_args(args=None):
+    """Main function, parses arguments from a list or command line"""
+    logger.addHandler(logging.StreamHandler())
 
+    # Parse arguments
+    if args is not None:
+        # Convert list to string for docopt
+        args_string = " ".join(args)
+        arguments = docopt(__doc__, argv=args_string.split(), version=__version__)
+    else:
+        arguments = docopt(__doc__, version=__version__)
+
+    if arguments["--debug"]:
+        logger.level = logging.DEBUG
+    elif arguments["--error"]:
+        logger.level = logging.ERROR
+
+    if "XDG_CONFIG_HOME" in os.environ:
+        config_file = pathlib.Path(os.environ["XDG_CONFIG_HOME"], "scdl", "scdl.cfg")
+    else:
+        config_file = pathlib.Path.home().joinpath(".config", "scdl", "scdl.cfg")
+
+    # import conf file
+    config = get_config(config_file)
+
+    logger.info("Soundcloud Downloader")
+    logger.debug(arguments)
+
+    client_id = arguments["--client-id"] or config["scdl"]["client_id"]
+    token = arguments["--auth-token"] or config["scdl"]["auth_token"]
+
+    client = SoundCloud(client_id, token if token else None)
+
+    if not client.is_client_id_valid():
+        if arguments["--client-id"]:
+            logger.warning(
+                "Invalid client_id specified by --client-id argument. "
+                "Using a dynamically generated client_id...",
+            )
+        elif config["scdl"]["client_id"]:
+            logger.warning(
+                f"Invalid client_id in {config_file}. Using a dynamically generated client_id...",
+            )
+        else:
+            logger.info("Generating dynamic client_id")
+        client = SoundCloud(None, token if token else None)
+        if not client.is_client_id_valid():
+            logger.error("Dynamically generated client_id is not valid")
+            return "Fehler: Ungültige client_id"
+        config["scdl"]["client_id"] = client.client_id
+        # save client_id
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        with get_filelock(config_file), open(config_file, "w", encoding="UTF-8") as f:
+            config.write(f)
+
+    if (token or arguments["me"]) and not client.is_auth_token_valid():
+        if arguments["--auth-token"]:
+            logger.error("Invalid auth_token specified by --auth-token argument")
+        else:
+            logger.error(f"Invalid auth_token in {config_file}")
+        return "Fehler: Ungültiger auth_token"
+
+    if arguments["-o"] is not None:
+        try:
+            arguments["--offset"] = int(arguments["-o"]) - 1
+            if arguments["--offset"] < 0:
+                raise ValueError
+        except Exception:
+            logger.error("Offset should be a positive integer...")
+            return "Fehler: Offset muss eine positive Ganzzahl sein"
+        logger.debug("offset: %d", arguments["--offset"])
+
+    if arguments["--min-size"] is not None:
+        try:
+            arguments["--min-size"] = utils.size_in_bytes(arguments["--min-size"])
+        except Exception:
+            logger.exception("Min size should be an integer with a possible unit suffix")
+            return "Fehler: Minimale Größe muss eine Ganzzahl mit optionalem Einheitssuffix sein"
+        logger.debug("min-size: %d", arguments["--min-size"])
+
+    if arguments["--max-size"] is not None:
+        try:
+            arguments["--max-size"] = utils.size_in_bytes(arguments["--max-size"])
+        except Exception:
+            logger.error("Max size should be an integer with a possible unit suffix")
+            return "Fehler: Maximale Größe muss eine Ganzzahl mit optionalem Einheitssuffix sein"
+        logger.debug("max-size: %d", arguments["--max-size"])
+
+    if arguments["--hidewarnings"]:
+        warnings.filterwarnings("ignore")
+
+    if not arguments["--name-format"]:
+        arguments["--name-format"] = config["scdl"]["name_format"]
+
+    if not arguments["--playlist-name-format"]:
+        arguments["--playlist-name-format"] = config["scdl"]["playlist_name_format"]
+
+    if arguments["me"]:
+        # set url to profile associated with auth token
+        me = client.get_me()
+        assert me is not None
+        arguments["-l"] = me.permalink_url
+
+    if arguments["-s"]:
+        url = search_soundcloud(client, arguments["-s"])
+        if url:
+            arguments["-l"] = url
+        else:
+            logger.error("Search failed")
+            return "Fehler: Suche fehlgeschlagen"
+
+    arguments["-l"] = validate_url(client, arguments["-l"])
+
+    if arguments["--download-archive"]:
+        try:
+            path = pathlib.Path(arguments["--download-archive"]).resolve()
+            arguments["--download-archive"] = path
+        except Exception:
+            logger.error(f"Invalid download archive file {arguments['--download-archive']}")
+            return "Fehler: Ungültige Download-Archivdatei"
+
+    if arguments["--sync"]:
+        try:
+            path = pathlib.Path(arguments["--sync"]).resolve()
+            arguments["--download-archive"] = path
+            arguments["--sync"] = path
+        except Exception:
+            logger.error(f"Invalid sync archive file {arguments['--sync']}")
+            return "Fehler: Ungültige Sync-Archivdatei"
+
+    # convert arguments dict to python_args (kwargs-friendly args)
+    python_args = {}
+    for key, value in arguments.items():
+        key = key.strip("-").replace("-", "_")
+        python_args[key] = value
+
+    # change download path
+    dl_path: str = arguments["--path"] or config["scdl"]["path"]
+    if os.path.exists(dl_path):
+        os.chdir(dl_path)
+    else:
+        if arguments["--path"]:
+            logger.error(f"Invalid download path '{dl_path}' specified by --path argument")
+        else:
+            logger.error(f"Invalid download path '{dl_path}' in {config_file}")
+        return f"Fehler: Ungültiger Download-Pfad '{dl_path}'"
+    logger.debug("Downloading to " + os.getcwd() + "...")
+
+    download_url(client, typing.cast(SCDLArgs, python_args))
+    return "Download erfolgreich abgeschlossen"
+
+class UiHandler(logging.Handler):
+    def __init__(self, callback=None):
+        super().__init__()
+        self.callback = callback
+
+    def emit(self, record):
+        msg = self.format(record)
+        if self.callback:
+            self.callback(msg)
+
+def get_ui_handler(callback):
+    handler = UiHandler(callback)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter('%(message)s'))
+    return handler
+    
 def main() -> None:
     """Main function, parses the URL from command line arguments"""
     logger.addHandler(logging.StreamHandler())
