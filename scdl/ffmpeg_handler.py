@@ -108,7 +108,7 @@ class FFmpegHandler:
         logger.debug(f"ffmpeg-kit command: {' '.join(commands)}")
 
         python = Python.getInstance()
-        ffmpeg_wrapper = python.getClass("com.example.myapp.FFmpegWrapper")
+        ffmpeg_wrapper = python.getClass("com.example.chaquopy.FFmpegWrapper")
 
         # Use a threading.Event to signal completion
         complete_event = threading.Event()
